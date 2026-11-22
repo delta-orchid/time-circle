@@ -30,7 +30,9 @@ mod tests {
         mutate_progression, mutate_turnaround, degree_presets_for_category,
     };
     use arranger::{
-        ArrangerSettings, ChordCompingStyle, BassStyle, DrumBeatPreset, generate_arrangement_notes,
+        ArrangerSettings, BassInstrument, BassStyle, ChordCompingStyle, ChordInstrument,
+        DrumBeatPreset, DrumKit, PercussionInstrument, generate_arrangement_notes,
+        GM_PERC_COWBELL, GM_PERC_HAND_CLAP, GM_PERC_SHAKER, GM_PERC_TAMBOURINE,
     };
     use soundfont_gen::generate_gm_soundfont;
     use midi_export::build_smf_bytes;
@@ -159,7 +161,9 @@ mod tests {
     #[test]
     fn test_midi_smf_export_roundtrip() {
         let prog = Progression::new_preset(PitchClass::F, FormPreset::PopVerseChorus16);
-        let settings = ArrangerSettings::default();
+        let mut settings = ArrangerSettings::default();
+        settings.drum_kit = DrumKit::TR808Electronic;
+        settings.percussion_inst = PercussionInstrument::Cowbell;
         let smf_bytes = build_smf_bytes(&prog, &settings, 2).expect("SMF export should succeed");
 
         assert!(!smf_bytes.is_empty());
@@ -167,5 +171,58 @@ mod tests {
         assert!(parsed.is_ok(), "SMF file should be valid standard MIDI");
         let smf = parsed.unwrap();
         assert!(smf.tracks.len() >= 3, "SMF should contain conductor, chords, bass, drums tracks");
+    }
+
+    #[test]
+    fn test_expanded_chord_and_bass_instruments() {
+        assert_eq!(ChordInstrument::ALL.len(), 10);
+        for inst in ChordInstrument::ALL {
+            assert!(!inst.name().is_empty());
+            assert!(inst.program_number() <= 127);
+        }
+
+        assert_eq!(BassInstrument::ALL.len(), 8);
+        for inst in BassInstrument::ALL {
+            assert!(!inst.name().is_empty());
+            assert!(inst.program_number() <= 127);
+        }
+    }
+
+    #[test]
+    fn test_drum_kits_and_percussion_layers() {
+        assert_eq!(DrumKit::ALL.len(), 6);
+        for kit in DrumKit::ALL {
+            assert!(!kit.name().is_empty());
+            assert!(kit.program_number() <= 127);
+        }
+
+        assert_eq!(PercussionInstrument::ALL.len(), 5);
+        for p in PercussionInstrument::ALL {
+            assert!(!p.name().is_empty());
+        }
+
+        let prog = Progression::new_preset(PitchClass::C, FormPreset::Standard12);
+
+        // Test Tambourine scheduling
+        let mut settings = ArrangerSettings::default();
+        settings.percussion_inst = PercussionInstrument::Tambourine;
+        settings.percussion_volume = 0.8;
+        let notes_tamb = generate_arrangement_notes(&prog, &settings);
+        assert!(notes_tamb.iter().any(|n| n.channel == 9 && n.note == GM_PERC_TAMBOURINE));
+
+        // Test Cowbell scheduling
+        settings.percussion_inst = PercussionInstrument::Cowbell;
+        let notes_cow = generate_arrangement_notes(&prog, &settings);
+        assert!(notes_cow.iter().any(|n| n.channel == 9 && n.note == GM_PERC_COWBELL));
+
+        // Test Handclap scheduling
+        settings.percussion_inst = PercussionInstrument::HandClap;
+        let notes_clap = generate_arrangement_notes(&prog, &settings);
+        assert!(notes_clap.iter().any(|n| n.channel == 9 && n.note == GM_PERC_HAND_CLAP));
+
+        // Test Shaker scheduling
+        settings.percussion_inst = PercussionInstrument::Shaker;
+        let notes_shaker = generate_arrangement_notes(&prog, &settings);
+        assert!(notes_shaker.iter().any(|n| n.channel == 9 && n.note == GM_PERC_SHAKER));
     }
 }

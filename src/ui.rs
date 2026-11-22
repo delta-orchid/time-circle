@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 
 use crate::arranger::{
     ArrangerSettings, BassInstrument, BassStyle, ChordCompingStyle, ChordInstrument,
-    DrumBeatPreset, TICKS_PER_BAR,
+    DrumBeatPreset, DrumKit, PercussionInstrument, TICKS_PER_BAR,
 };
 use crate::audio::AudioEngine;
 use crate::theory::{
@@ -690,6 +690,19 @@ impl TimeCircleApp {
             });
 
             ui.horizontal(|ui| {
+                ui.label("Drum Kit:");
+                egui::ComboBox::from_id_salt("drum_kit_combo")
+                    .selected_text(self.settings.drum_kit.name())
+                    .show_ui(ui, |ui| {
+                        for kit in DrumKit::ALL {
+                            if ui.selectable_value(&mut self.settings.drum_kit, kit, kit.name()).clicked() {
+                                self.sync_audio_arrangement();
+                            }
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
                 ui.label("Beat Preset:");
                 egui::ComboBox::from_id_salt("drum_preset_combo")
                     .selected_text(self.settings.drum_preset.name())
@@ -702,10 +715,32 @@ impl TimeCircleApp {
                     });
             });
 
+            ui.horizontal(|ui| {
+                ui.label("Percussion:");
+                egui::ComboBox::from_id_salt("drum_perc_combo")
+                    .selected_text(self.settings.percussion_inst.name())
+                    .show_ui(ui, |ui| {
+                        for p in PercussionInstrument::ALL {
+                            if ui.selectable_value(&mut self.settings.percussion_inst, p, p.name()).clicked() {
+                                self.sync_audio_arrangement();
+                            }
+                        }
+                    });
+            });
+
+            if self.settings.percussion_inst != PercussionInstrument::None {
+                ui.horizontal(|ui| {
+                    ui.label("Perc Volume:");
+                    if ui.add(egui::Slider::new(&mut self.settings.percussion_volume, 0.0..=1.0)).changed() {
+                        self.sync_audio_arrangement();
+                    }
+                });
+            }
+
             ui.checkbox(&mut self.settings.turnaround_drum_fill, "Turnaround Drum Fill").changed();
 
             ui.horizontal(|ui| {
-                ui.label("Volume:");
+                ui.label("Kit Volume:");
                 if ui.add(egui::Slider::new(&mut self.settings.drum_volume, 0.0..=1.0)).changed() {
                     self.sync_audio_arrangement();
                 }

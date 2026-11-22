@@ -109,7 +109,7 @@ pub fn build_smf_bytes(
     // --- Track 3: Drums (Channel 10, 0-indexed 9) ---
     if settings.drum_enabled {
         let drum_notes: Vec<&ScheduledNote> = all_notes.iter().filter(|n| n.channel == 9).collect();
-        let track3 = build_channel_track(b"Drums", 9, 0, &drum_notes);
+        let track3 = build_channel_track(b"Drums", 9, settings.drum_kit.program_number(), &drum_notes);
         smf.tracks.push(track3);
     }
 
@@ -146,18 +146,16 @@ fn build_channel_track(
         kind: TrackEventKind::Meta(MetaMessage::TrackName(name)),
     });
 
-    // Program change (except for GM drums which defaults to bank 128 preset 0)
-    if channel != 9 {
-        track.push(TrackEvent {
-            delta: u28::from(0u32),
-            kind: TrackEventKind::Midi {
-                channel: u4::from(channel),
-                message: MidiMessage::ProgramChange {
-                    program: u7::from(program),
-                },
+    // Program change
+    track.push(TrackEvent {
+        delta: u28::from(0u32),
+        kind: TrackEventKind::Midi {
+            channel: u4::from(channel),
+            message: MidiMessage::ProgramChange {
+                program: u7::from(program.min(127)),
             },
-        });
-    }
+        },
+    });
 
     let mut raw_events: Vec<RawTimedEvent> = Vec::new();
     for n in notes {
