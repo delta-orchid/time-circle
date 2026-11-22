@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Time Circle — Blues & Groove Generator</title>
+    <link data-trunk rel="rust" data-wasm-opt="2" />
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #121418;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #E2E8F0;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #time_circle_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+            touch-action: none;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 0.4s ease;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #38BDF8;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 15px;
+            letter-spacing: 0.05em;
+            color: #94A3B8;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading Time Circle WebAssembly...</div>
+    </div>
+    <canvas id="time_circle_canvas"></canvas>
+    <script>
+        // Hide loading screen once canvas gets focus or paints
+        const canvas = document.getElementById("time_circle_canvas");
+        const loading = document.getElementById("loading");
+        const observer = new MutationObserver(() => {
+            if (canvas.hasAttribute("style") || canvas.width > 0) {
+                loading.style.opacity = "0";
+                setTimeout(() => { loading.style.display = "none"; }, 400);
+            }
+        });
+        observer.observe(canvas, { attributes: true });
+        window.addEventListener("pointerdown", () => {
+            if (loading.style.display !== "none") {
+                loading.style.opacity = "0";
+                setTimeout(() => { loading.style.display = "none"; }, 400);
+            }
+        }, { once: true });
+    </script>
+</body>
+</html>

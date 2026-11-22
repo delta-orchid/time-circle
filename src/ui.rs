@@ -22,6 +22,7 @@ pub struct TimeCircleApp {
     pub spice_level: f32,
     pub chorus_export_count: usize,
     pub export_status_message: Option<(String, f32)>, // message, expiry time
+    pub mcp_bridge: crate::mcp_bridge::McpBridge,
 }
 
 impl TimeCircleApp {
@@ -34,6 +35,8 @@ impl TimeCircleApp {
             eng.update_arrangement(&prog, &settings);
         }
 
+        let mcp_bridge = crate::mcp_bridge::McpBridge::new(crate::mcp_bridge::DEFAULT_WS_URL);
+
         Self {
             prog,
             settings,
@@ -43,6 +46,7 @@ impl TimeCircleApp {
             spice_level: 0.5,
             chorus_export_count: 2,
             export_status_message: None,
+            mcp_bridge,
         }
     }
 
@@ -55,10 +59,15 @@ impl TimeCircleApp {
 
 impl eframe::App for TimeCircleApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Request continuous repaint while playing for smooth playhead animation
+        // Handle incoming MCP commands from local MCP server
+        self.handle_mcp_commands();
+
+        // Request continuous repaint while playing or connected to MCP
         let is_playing = self.audio.as_ref().map(|a| a.is_playing()).unwrap_or(false);
         if is_playing {
             ctx.request_repaint();
+        } else if self.mcp_bridge.is_connected() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(60));
         }
 
         // Top Control / Transport Bar
@@ -69,7 +78,29 @@ impl eframe::App for TimeCircleApp {
         // Bottom Status / Message Bar
         egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("SoundFont: Built-in GM SoundFont");
+                if let Err(ref err) = self.audio {
+                    ui.colored_label(Color32::from_rgb(255, 90, 90), format!("⚠️ Audio: {}", err));
+                    if ui.button("Retry Audio").clicked() {
+                        self.audio = AudioEngine::new();
+                        if let Ok(ref eng) = self.audio {
+                            eng.update_arrangement(&self.prog, &self.settings);
+                        }
+                    }
+                } else {
+                    ui.label("SoundFont: Built-in GM SoundFont");
+                }
+                ui.separator();
+
+                if self.mcp_bridge.is_connected() {
+                    ui.colored_label(Color32::from_rgb(100, 255, 120), "🟢 MCP Connected");
+                } else {
+                    ui.colored_label(Color32::from_rgb(170, 180, 195), "⚪ MCP Disconnected");
+                    #[cfg(target_arch = "wasm32")]
+                    if ui.button("Connect").on_hover_text("Connect to ws://127.0.0.1:3847").clicked() {
+                        self.mcp_bridge.connect();
+                    }
+                }
+
                 ui.separator();
                 if let Some((ref msg, _)) = self.export_status_message {
                     ui.colored_label(Color32::from_rgb(100, 255, 160), msg);
@@ -105,6 +136,12 @@ impl TimeCircleApp {
             let is_playing = self.audio.as_ref().map(|a| a.is_playing()).unwrap_or(false);
 
             if ui.button(if is_playing { "⏸ Pause" } else { "▶ Play" }).clicked() {
+                if self.audio.is_err() {
+                    self.audio = AudioEngine::new();
+                    if let Ok(ref eng) = self.audio {
+                        eng.update_arrangement(&self.prog, &self.settings);
+                    }
+                }
                 if let Ok(ref eng) = self.audio {
                     eng.set_playing(!is_playing);
                 }
@@ -202,22 +239,47 @@ impl TimeCircleApp {
                     FormCategory::PopRock => "pop_rock",
                     FormCategory::SoulRnB => "soul_rnb",
                 };
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Standard MIDI File", &["mid", "midi"])
-                    .set_file_name(&format!("{}_{}.mid", category_prefix, self.prog.key.name(false).to_lowercase()))
-                    .save_file()
+                let filename = format!("{}_{}.mid", category_prefix, self.prog.key.name(false).to_lowercase());
+
+                #[cfg(not(target_arch = "wasm32"))]
                 {
-                    match crate::midi_export::export_smf_file(
-                        &path,
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Standard MIDI File", &["mid", "midi"])
+                        .set_file_name(&filename)
+                        .save_file()
+                    {
+                        match crate::midi_export::export_smf_file(
+                            &path,
+                            &self.prog,
+                            &self.settings,
+                            self.chorus_export_count,
+                        ) {
+                            Ok(_) => {
+                                self.export_status_message = Some((
+                                    format!("Exported {} successfully!", path.display()),
+                                    5.0,
+                                ));
+                            }
+                            Err(e) => {
+                                self.export_status_message = Some((format!("Export failed: {}", e), 5.0));
+                            }
+                        }
+                    }
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    match crate::midi_export::build_smf_bytes(
                         &self.prog,
                         &self.settings,
                         self.chorus_export_count,
                     ) {
-                        Ok(_) => {
-                            self.export_status_message = Some((
-                                format!("Exported {} successfully!", path.display()),
-                                5.0,
-                            ));
+                        Ok(bytes) => {
+                            if let Err(e) = crate::midi_export::trigger_browser_midi_download(&filename, &bytes) {
+                                self.export_status_message = Some((format!("Download failed: {}", e), 5.0));
+                            } else {
+                                self.export_status_message = Some((format!("Downloaded {} successfully!", filename), 5.0));
+                            }
                         }
                         Err(e) => {
                             self.export_status_message = Some((format!("Export failed: {}", e), 5.0));
@@ -566,6 +628,12 @@ impl TimeCircleApp {
                     });
 
                 if ui.button("🔊 Audition").clicked() {
+                    if self.audio.is_err() {
+                        self.audio = AudioEngine::new();
+                        if let Ok(ref eng) = self.audio {
+                            eng.update_arrangement(&self.prog, &self.settings);
+                        }
+                    }
                     if let Ok(ref eng) = self.audio {
                         eng.preview_chord(&cur_chord);
                     }
@@ -758,6 +826,400 @@ impl TimeCircleApp {
             });
             ui.weak("Controls frequency of substitutions (#IVdim7, ii-V, 9ths, 13ths) when clicking Mutate.");
         });
+    }
+
+    pub fn get_session_state(&self) -> crate::mcp_bridge::SessionState {
+        let is_playing = self.audio.as_ref().map(|a| a.is_playing()).unwrap_or(false);
+        let current_tick = self.audio.as_ref().map(|a| a.current_tick()).unwrap_or(0);
+        let total_bars = self.prog.bars.len();
+        let current_bar = if total_bars > 0 {
+            (current_tick / TICKS_PER_BAR) as usize % total_bars
+        } else {
+            0
+        };
+
+        let bars = self.prog.bars.iter().enumerate().map(|(idx, bar)| {
+            crate::mcp_bridge::BarSummary {
+                index: idx,
+                slots: bar.slots.iter().map(|c| c.name(false)).collect(),
+            }
+        }).collect();
+
+        crate::mcp_bridge::SessionState {
+            key: self.prog.key.name(false).to_string(),
+            preset: self.prog.preset.name().to_string(),
+            category: self.prog.preset.category().name().to_string(),
+            bar_count: total_bars,
+            bars,
+            settings: crate::mcp_bridge::MixerSummary {
+                bpm: self.settings.bpm,
+                swing_pct: (self.settings.swing_ratio * 100.0).round() as u32,
+                chord_enabled: self.settings.chord_enabled,
+                chord_instrument: self.settings.chord_instrument.name().to_string(),
+                chord_style: self.settings.chord_style.name().to_string(),
+                chord_volume: self.settings.chord_volume,
+                bass_enabled: self.settings.bass_enabled,
+                bass_instrument: self.settings.bass_instrument.name().to_string(),
+                bass_style: self.settings.bass_style.name().to_string(),
+                bass_volume: self.settings.bass_volume,
+                drum_enabled: self.settings.drum_enabled,
+                drum_kit: self.settings.drum_kit.name().to_string(),
+                drum_preset: self.settings.drum_preset.name().to_string(),
+                drum_volume: self.settings.drum_volume,
+                percussion_inst: self.settings.percussion_inst.name().to_string(),
+                percussion_volume: self.settings.percussion_volume,
+                turnaround_drum_fill: self.settings.turnaround_drum_fill,
+            },
+            is_playing,
+            current_tick,
+            current_bar,
+            spice_level: self.spice_level,
+            chorus_export_count: self.chorus_export_count,
+        }
+    }
+
+    pub fn handle_mcp_commands(&mut self) {
+        use crate::mcp_bridge::{McpInboundCommand, McpOutboundMessage};
+        let commands = self.mcp_bridge.poll_commands();
+        for cmd in commands {
+            match cmd {
+                McpInboundCommand::GetState { request_id } => {
+                    let state = self.get_session_state();
+                    self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                        request_id,
+                        ok: true,
+                        message: "State retrieved successfully".to_string(),
+                        state: Some(state),
+                        midi_base64: None,
+                    });
+                }
+                McpInboundCommand::Transport { request_id, action, bar } => {
+                    let act = action.to_ascii_lowercase();
+                    match act.as_str() {
+                        "play" => {
+                            if let Ok(ref eng) = self.audio {
+                                eng.set_playing(true);
+                            }
+                        }
+                        "pause" => {
+                            if let Ok(ref eng) = self.audio {
+                                eng.set_playing(false);
+                            }
+                        }
+                        "stop" => {
+                            if let Ok(ref eng) = self.audio {
+                                eng.set_playing(false);
+                                eng.set_tick(0);
+                            }
+                        }
+                        "jump" => {
+                            if let Some(b) = bar {
+                                let total = self.prog.bars.len();
+                                if total > 0 {
+                                    let target_bar = b.min(total - 1);
+                                    if let Ok(ref eng) = self.audio {
+                                        eng.set_tick((target_bar as u32) * TICKS_PER_BAR);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    let state = self.get_session_state();
+                    self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                        request_id,
+                        ok: true,
+                        message: format!("Transport executed: {}", action),
+                        state: Some(state),
+                        midi_base64: None,
+                    });
+                }
+                McpInboundCommand::SetProgression { request_id, key, preset } => {
+                    let mut changed = false;
+                    if let Some(ref k_str) = key {
+                        if let Some(p) = PitchClass::from_name(k_str) {
+                            self.prog.key = p;
+                            changed = true;
+                        }
+                    }
+                    if let Some(ref pr_str) = preset {
+                        if let Some(pr) = FormPreset::from_identifier_or_name(pr_str) {
+                            self.prog = Progression::new_preset(self.prog.key, pr);
+                            self.selected_bar = 0;
+                            self.selected_slot = 0;
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        self.sync_audio_arrangement();
+                    }
+                    let state = self.get_session_state();
+                    self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                        request_id,
+                        ok: true,
+                        message: "Progression updated".to_string(),
+                        state: Some(state),
+                        midi_base64: None,
+                    });
+                }
+                McpInboundCommand::Transpose { request_id, key } => {
+                    if let Some(target_key) = PitchClass::from_name(&key) {
+                        self.prog.transpose(target_key);
+                        self.sync_audio_arrangement();
+                        let state = self.get_session_state();
+                        self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                            request_id,
+                            ok: true,
+                            message: format!("Transposed to {}", target_key.name(false)),
+                            state: Some(state),
+                            midi_base64: None,
+                        });
+                    } else {
+                        self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                            request_id,
+                            ok: false,
+                            message: format!("Invalid key name: {}", key),
+                            state: Some(self.get_session_state()),
+                            midi_base64: None,
+                        });
+                    }
+                }
+                McpInboundCommand::SetBarChords { request_id, bar_index, chords } => {
+                    if bar_index < self.prog.bars.len() && !chords.is_empty() {
+                        let parsed: Vec<Chord> = chords.iter().filter_map(|s| Chord::parse(s)).collect();
+                        if !parsed.is_empty() {
+                            let slot_count = if parsed.len() >= 4 {
+                                4
+                            } else if parsed.len() == 2 {
+                                2
+                            } else {
+                                1
+                            };
+                            let mut new_slots = Vec::with_capacity(slot_count);
+                            for i in 0..slot_count {
+                                new_slots.push(parsed[i % parsed.len()]);
+                            }
+                            self.prog.bars[bar_index].slots = new_slots;
+                            self.sync_audio_arrangement();
+
+                            let state = self.get_session_state();
+                            self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                                request_id,
+                                ok: true,
+                                message: format!("Set bar {} chords: {:?}", bar_index + 1, chords),
+                                state: Some(state),
+                                midi_base64: None,
+                            });
+                        } else {
+                            self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                                request_id,
+                                ok: false,
+                                message: "Could not parse any chord symbols".to_string(),
+                                state: Some(self.get_session_state()),
+                                midi_base64: None,
+                            });
+                        }
+                    } else {
+                        self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                            request_id,
+                            ok: false,
+                            message: format!("Invalid bar index {} (total: {})", bar_index, self.prog.bars.len()),
+                            state: Some(self.get_session_state()),
+                            midi_base64: None,
+                        });
+                    }
+                }
+                McpInboundCommand::Mutate { request_id, spice } => {
+                    let lvl = spice.unwrap_or(self.spice_level).clamp(0.0, 1.0);
+                    self.spice_level = lvl;
+                    mutate_progression(&mut self.prog, lvl);
+                    self.sync_audio_arrangement();
+                    let state = self.get_session_state();
+                    self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                        request_id,
+                        ok: true,
+                        message: format!("Mutated progression with spice {}", lvl),
+                        state: Some(state),
+                        midi_base64: None,
+                    });
+                }
+                McpInboundCommand::Turnaround { request_id } => {
+                    if self.prog.preset.category() == FormCategory::Blues {
+                        mutate_turnaround(&mut self.prog);
+                        self.sync_audio_arrangement();
+                        let state = self.get_session_state();
+                        self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                            request_id,
+                            ok: true,
+                            message: "Generated blues turnaround".to_string(),
+                            state: Some(state),
+                            midi_base64: None,
+                        });
+                    } else {
+                        self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                            request_id,
+                            ok: false,
+                            message: "Turnarounds are only available on Blues forms".to_string(),
+                            state: Some(self.get_session_state()),
+                            midi_base64: None,
+                        });
+                    }
+                }
+                McpInboundCommand::AuditionChord { request_id, chord } => {
+                    if let Some(ch) = Chord::parse(&chord) {
+                        if let Ok(ref eng) = self.audio {
+                            eng.preview_chord(&ch);
+                        }
+                        self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                            request_id,
+                            ok: true,
+                            message: format!("Auditioning chord {}", ch.name(false)),
+                            state: Some(self.get_session_state()),
+                            midi_base64: None,
+                        });
+                    } else {
+                        self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                            request_id,
+                            ok: false,
+                            message: format!("Could not parse chord: {}", chord),
+                            state: Some(self.get_session_state()),
+                            midi_base64: None,
+                        });
+                    }
+                }
+                McpInboundCommand::UpdateMixer {
+                    request_id,
+                    bpm,
+                    swing_pct,
+                    chord_enabled,
+                    chord_instrument,
+                    chord_style,
+                    chord_volume,
+                    bass_enabled,
+                    bass_instrument,
+                    bass_style,
+                    bass_volume,
+                    drum_enabled,
+                    drum_kit,
+                    drum_preset,
+                    drum_volume,
+                    percussion_inst,
+                    percussion_volume,
+                    turnaround_drum_fill,
+                } => {
+                    if let Some(v) = bpm { self.settings.bpm = v.clamp(40.0, 240.0); }
+                    if let Some(v) = swing_pct { self.settings.swing_ratio = (v / 100.0).clamp(0.5, 0.75); }
+                    if let Some(v) = chord_enabled { self.settings.chord_enabled = v; }
+                    if let Some(ref name) = chord_instrument {
+                        for inst in ChordInstrument::ALL {
+                            if inst.name().eq_ignore_ascii_case(name) || format!("{:?}", inst).eq_ignore_ascii_case(name) {
+                                self.settings.chord_instrument = inst;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(ref style) = chord_style {
+                        for s in ChordCompingStyle::ALL {
+                            if s.name().eq_ignore_ascii_case(style) || format!("{:?}", s).eq_ignore_ascii_case(style) {
+                                self.settings.chord_style = s;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(v) = chord_volume { self.settings.chord_volume = v.clamp(0.0, 1.0); }
+                    if let Some(v) = bass_enabled { self.settings.bass_enabled = v; }
+                    if let Some(ref name) = bass_instrument {
+                        for inst in BassInstrument::ALL {
+                            if inst.name().eq_ignore_ascii_case(name) || format!("{:?}", inst).eq_ignore_ascii_case(name) {
+                                self.settings.bass_instrument = inst;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(ref style) = bass_style {
+                        for s in BassStyle::ALL {
+                            if s.name().eq_ignore_ascii_case(style) || format!("{:?}", s).eq_ignore_ascii_case(style) {
+                                self.settings.bass_style = s;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(v) = bass_volume { self.settings.bass_volume = v.clamp(0.0, 1.0); }
+                    if let Some(v) = drum_enabled { self.settings.drum_enabled = v; }
+                    if let Some(ref name) = drum_kit {
+                        for kit in DrumKit::ALL {
+                            if kit.name().eq_ignore_ascii_case(name) || format!("{:?}", kit).eq_ignore_ascii_case(name) {
+                                self.settings.drum_kit = kit;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(ref name) = drum_preset {
+                        for p in DrumBeatPreset::ALL {
+                            if p.name().eq_ignore_ascii_case(name) || format!("{:?}", p).eq_ignore_ascii_case(name) {
+                                self.settings.drum_preset = p;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(v) = drum_volume { self.settings.drum_volume = v.clamp(0.0, 1.0); }
+                    if let Some(ref name) = percussion_inst {
+                        for p in PercussionInstrument::ALL {
+                            if p.name().eq_ignore_ascii_case(name) || format!("{:?}", p).eq_ignore_ascii_case(name) {
+                                self.settings.percussion_inst = p;
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(v) = percussion_volume { self.settings.percussion_volume = v.clamp(0.0, 1.0); }
+                    if let Some(v) = turnaround_drum_fill { self.settings.turnaround_drum_fill = v; }
+
+                    self.sync_audio_arrangement();
+                    let state = self.get_session_state();
+                    self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                        request_id,
+                        ok: true,
+                        message: "Mixer settings updated".to_string(),
+                        state: Some(state),
+                        midi_base64: None,
+                    });
+                }
+                McpInboundCommand::ExportMidi { request_id, choruses, trigger_download } => {
+                    let count = choruses.unwrap_or(self.chorus_export_count).clamp(1, 16);
+                    match crate::midi_export::build_smf_bytes(&self.prog, &self.settings, count) {
+                        Ok(bytes) => {
+                            use base64::Engine;
+                            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+                            if trigger_download.unwrap_or(false) {
+                                #[cfg(target_arch = "wasm32")]
+                                {
+                                    let filename = format!("time_circle_{}_{}x.mid", self.prog.key.name(false).to_lowercase(), count);
+                                    let _ = crate::midi_export::trigger_browser_midi_download(&filename, &bytes);
+                                }
+                            }
+
+                            self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                                request_id,
+                                ok: true,
+                                message: format!("Exported {} choruses to MIDI", count),
+                                state: Some(self.get_session_state()),
+                                midi_base64: Some(b64),
+                            });
+                        }
+                        Err(e) => {
+                            self.mcp_bridge.send(&McpOutboundMessage::CommandResponse {
+                                request_id,
+                                ok: false,
+                                message: format!("MIDI export failed: {}", e),
+                                state: Some(self.get_session_state()),
+                                midi_base64: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

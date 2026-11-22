@@ -4,7 +4,6 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 
 use crate::arranger::{ArrangerSettings, ScheduledNote, TICKS_PER_BAR};
@@ -16,7 +15,14 @@ pub struct AudioEngine {
     pub current_tick: Arc<AtomicU32>,
     pub total_ticks: Arc<AtomicU32>,
     pub shared_data: Arc<Mutex<AudioSharedData>>,
+    #[cfg(not(target_arch = "wasm32"))]
     _stream: Option<cpal::Stream>,
+    #[cfg(target_arch = "wasm32")]
+    _ctx: Option<web_sys::AudioContext>,
+    #[cfg(target_arch = "wasm32")]
+    _processor: Option<web_sys::ScriptProcessorNode>,
+    #[cfg(target_arch = "wasm32")]
+    _closure: Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::AudioProcessingEvent)>>,
 }
 
 pub struct AudioSharedData {
@@ -53,80 +59,194 @@ impl AudioEngine {
         let sf = SoundFont::new(&mut cursor).map_err(|e| format!("Failed to parse SoundFont: {:?}", e))?;
         let sf_arc = Arc::new(sf);
 
-        // Setup CPAL Audio Stream
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or_else(|| "No audio output device found".to_string())?;
+        // -------------------------------------------------------------
+        // WebAssembly backend: Native Web Audio API (ScriptProcessorNode)
+        // -------------------------------------------------------------
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::closure::Closure;
+            use wasm_bindgen::JsCast;
 
-        let config = device
-            .default_output_config()
-            .map_err(|e| format!("Failed to get default output config: {}", e))?;
+            let ctx = web_sys::AudioContext::new()
+                .map_err(|e| format!("Failed to create AudioContext: {:?}", e))?;
 
-        let sample_rate = config.sample_rate().0;
-        let channels = config.channels() as usize;
+            let sample_rate = ctx.sample_rate() as u32;
 
-        let syn_settings = SynthesizerSettings::new(sample_rate as i32);
-        let mut synth = Synthesizer::new(&sf_arc, &syn_settings)
-            .map_err(|e| format!("Failed to create synthesizer: {:?}", e))?;
+            let syn_settings = SynthesizerSettings::new(sample_rate as i32);
+            let mut synth = Synthesizer::new(&sf_arc, &syn_settings)
+                .map_err(|e| format!("Failed to create synthesizer: {:?}", e))?;
 
-        // Initialize program changes
-        synth.process_midi_message(0, 0xC0, 0, 0); // Ch 1 Piano
-        synth.process_midi_message(1, 0xC0, 32, 0); // Ch 2 Upright Bass
-        synth.process_midi_message(9, 0xC0, 0, 0); // Ch 10 Drums
+            synth.process_midi_message(0, 0xC0, 0, 0); // Ch 1 Piano
+            synth.process_midi_message(1, 0xC0, 32, 0); // Ch 2 Upright Bass
+            synth.process_midi_message(9, 0xC0, 0, 0); // Ch 10 Drums
 
-        let is_playing_clone = Arc::clone(&is_playing);
-        let current_tick_clone = Arc::clone(&current_tick);
-        let shared_data_clone = Arc::clone(&shared_data);
+            let is_playing_clone = Arc::clone(&is_playing);
+            let current_tick_clone = Arc::clone(&current_tick);
+            let shared_data_clone = Arc::clone(&shared_data);
 
-        // Circular buffer or sample generator state
-        let mut left_buf = vec![0.0f32; 512];
-        let mut right_buf = vec![0.0f32; 512];
-        let mut last_prog_chord = 255u8;
-        let mut last_prog_bass = 255u8;
-        let mut last_prog_drum = 255u8;
-        let mut play_head_sample = 0.0f64;
+            let mut left_buf = vec![0.0f32; 2048];
+            let mut right_buf = vec![0.0f32; 2048];
+            let mut last_prog_chord = 255u8;
+            let mut last_prog_bass = 255u8;
+            let mut last_prog_drum = 255u8;
 
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_output_stream(
-                &config.into(),
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    render_audio_block(
-                        data,
-                        channels,
-                        sample_rate,
-                        &mut synth,
-                        &mut left_buf,
-                        &mut right_buf,
-                        &is_playing_clone,
-                        &current_tick_clone,
-                        &shared_data_clone,
-                        &mut last_prog_chord,
-                        &mut last_prog_bass,
-                        &mut last_prog_drum,
-                        &mut play_head_sample,
-                    );
+            let processor = ctx
+                .create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
+                    2048, 0, 2,
+                )
+                .map_err(|e| format!("Failed to create ScriptProcessorNode: {:?}", e))?;
+
+            let closure = Closure::<dyn FnMut(web_sys::AudioProcessingEvent)>::new(
+                move |event: web_sys::AudioProcessingEvent| {
+                    if let Ok(out_buf) = event.output_buffer() {
+                        let num_frames = out_buf.length() as usize;
+
+                        render_synth_block(
+                            num_frames,
+                            sample_rate,
+                            &mut synth,
+                            &mut left_buf,
+                            &mut right_buf,
+                            &is_playing_clone,
+                            &current_tick_clone,
+                            &shared_data_clone,
+                            &mut last_prog_chord,
+                            &mut last_prog_bass,
+                            &mut last_prog_drum,
+                        );
+
+                        let _ = out_buf.copy_to_channel(&mut left_buf[..num_frames], 0);
+                        let _ = out_buf.copy_to_channel(&mut right_buf[..num_frames], 1);
+                    }
                 },
-                |err| eprintln!("Audio stream error: {}", err),
-                None,
-            ),
-            _ => return Err("Unsupported sample format".to_string()),
+            );
+
+            processor.set_onaudioprocess(Some(closure.as_ref().unchecked_ref()));
+            let destination = ctx.destination();
+            let _ = processor.connect_with_audio_node(&destination);
+
+            Ok(Self {
+                is_playing,
+                current_tick,
+                total_ticks,
+                shared_data,
+                _ctx: Some(ctx),
+                _processor: Some(processor),
+                _closure: Some(closure),
+            })
         }
-        .map_err(|e| format!("Failed to build audio stream: {}", e))?;
 
-        stream.play().map_err(|e| format!("Failed to start audio stream: {}", e))?;
+        // -------------------------------------------------------------
+        // Native desktop backend: CPAL (CoreAudio, ALSA, WASAPI)
+        // -------------------------------------------------------------
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-        Ok(Self {
-            is_playing,
-            current_tick,
-            total_ticks,
-            shared_data,
-            _stream: Some(stream),
-        })
+            let host = cpal::default_host();
+            let device = host
+                .default_output_device()
+                .ok_or_else(|| "No audio output device found".to_string())?;
+
+            let config = device
+                .default_output_config()
+                .map_err(|e| format!("Failed to get default output config: {}", e))?;
+
+            let sample_rate = config.sample_rate().0;
+            let channels = config.channels() as usize;
+
+            let syn_settings = SynthesizerSettings::new(sample_rate as i32);
+            let mut synth = Synthesizer::new(&sf_arc, &syn_settings)
+                .map_err(|e| format!("Failed to create synthesizer: {:?}", e))?;
+
+            // Initialize program changes
+            synth.process_midi_message(0, 0xC0, 0, 0); // Ch 1 Piano
+            synth.process_midi_message(1, 0xC0, 32, 0); // Ch 2 Upright Bass
+            synth.process_midi_message(9, 0xC0, 0, 0); // Ch 10 Drums
+
+            let is_playing_clone = Arc::clone(&is_playing);
+            let current_tick_clone = Arc::clone(&current_tick);
+            let shared_data_clone = Arc::clone(&shared_data);
+
+            let mut left_buf = vec![0.0f32; 512];
+            let mut right_buf = vec![0.0f32; 512];
+            let mut last_prog_chord = 255u8;
+            let mut last_prog_bass = 255u8;
+            let mut last_prog_drum = 255u8;
+
+            let stream = match config.sample_format() {
+                cpal::SampleFormat::F32 => device.build_output_stream(
+                    &config.into(),
+                    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                        let num_frames = data.len() / channels;
+                        render_synth_block(
+                            num_frames,
+                            sample_rate,
+                            &mut synth,
+                            &mut left_buf,
+                            &mut right_buf,
+                            &is_playing_clone,
+                            &current_tick_clone,
+                            &shared_data_clone,
+                            &mut last_prog_chord,
+                            &mut last_prog_bass,
+                            &mut last_prog_drum,
+                        );
+
+                        let l_slice = &left_buf[..num_frames];
+                        let r_slice = &right_buf[..num_frames];
+                        for i in 0..num_frames {
+                            if channels == 1 {
+                                data[i] = (l_slice[i] + r_slice[i]) * 0.5;
+                            } else {
+                                data[i * channels] = l_slice[i];
+                                data[i * channels + 1] = r_slice[i];
+                                for c in 2..channels {
+                                    data[i * channels + c] = 0.0;
+                                }
+                            }
+                        }
+                    },
+                    |err| eprintln!("Audio stream error: {}", err),
+                    None,
+                ),
+                _ => return Err("Unsupported sample format".to_string()),
+            }
+            .map_err(|e| format!("Failed to build audio stream: {}", e))?;
+
+            stream.play().map_err(|e| format!("Failed to start audio stream: {}", e))?;
+
+            Ok(Self {
+                is_playing,
+                current_tick,
+                total_ticks,
+                shared_data,
+                _stream: Some(stream),
+            })
+        }
     }
 
     pub fn set_playing(&self, playing: bool) {
+        if playing {
+            self.resume();
+        }
         self.is_playing.store(playing, Ordering::Relaxed);
+    }
+
+    pub fn resume(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(ref ctx) = self._ctx {
+                let _ = ctx.resume();
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(ref s) = self._stream {
+                use cpal::traits::StreamTrait;
+                let _ = s.play();
+            }
+        }
     }
 
     pub fn is_playing(&self) -> bool {
@@ -161,6 +281,7 @@ impl AudioEngine {
     }
 
     pub fn preview_chord(&self, chord: &crate::theory::Chord) {
+        self.resume();
         let notes = chord.voicing(60);
         if let Ok(mut lock) = self.shared_data.lock() {
             lock.preview_notes = notes;
@@ -169,9 +290,8 @@ impl AudioEngine {
     }
 }
 
-fn render_audio_block(
-    output: &mut [f32],
-    channels: usize,
+fn render_synth_block(
+    num_frames: usize,
     sample_rate: u32,
     synth: &mut Synthesizer,
     left_buf: &mut Vec<f32>,
@@ -182,10 +302,7 @@ fn render_audio_block(
     last_prog_chord: &mut u8,
     last_prog_bass: &mut u8,
     last_prog_drum: &mut u8,
-    _play_head_sample: &mut f64,
 ) {
-    let num_frames = output.len() / channels;
-
     if left_buf.len() < num_frames {
         left_buf.resize(num_frames, 0.0);
         right_buf.resize(num_frames, 0.0);
@@ -270,21 +387,8 @@ fn render_audio_block(
         }
     }
 
-    // Synthesize samples
+    // Synthesize samples into buffer slices
     let l_slice = &mut left_buf[..num_frames];
     let r_slice = &mut right_buf[..num_frames];
     synth.render(l_slice, r_slice);
-
-    // Write to CPAL interleaved buffer
-    for i in 0..num_frames {
-        if channels == 1 {
-            output[i] = (l_slice[i] + r_slice[i]) * 0.5;
-        } else {
-            output[i * channels] = l_slice[i];
-            output[i * channels + 1] = r_slice[i];
-            for c in 2..channels {
-                output[i * channels + c] = 0.0;
-            }
-        }
-    }
 }
