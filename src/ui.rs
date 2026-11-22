@@ -22,8 +22,6 @@ pub struct TimeCircleApp {
     pub spice_level: f32,
     pub chorus_export_count: usize,
     pub export_status_message: Option<(String, f32)>, // message, expiry time
-    pub midi_port_names: Vec<String>,
-    pub selected_midi_port: Option<usize>,
 }
 
 impl TimeCircleApp {
@@ -36,16 +34,6 @@ impl TimeCircleApp {
             eng.update_arrangement(&prog, &settings);
         }
 
-        // List available MIDI output ports
-        let midi_port_names = match midir::MidiOutput::new("TimeCircleProbe") {
-            Ok(midi_out) => midi_out
-                .ports()
-                .iter()
-                .filter_map(|p| midi_out.port_name(p).ok())
-                .collect(),
-            Err(_) => Vec::new(),
-        };
-
         Self {
             prog,
             settings,
@@ -55,30 +43,12 @@ impl TimeCircleApp {
             spice_level: 0.5,
             chorus_export_count: 2,
             export_status_message: None,
-            midi_port_names,
-            selected_midi_port: None,
         }
     }
 
     pub fn sync_audio_arrangement(&self) {
         if let Ok(ref eng) = self.audio {
             eng.update_arrangement(&self.prog, &self.settings);
-        }
-    }
-
-    pub fn connect_midi_port(&mut self, port_idx: usize) {
-        if let Ok(midi_out_probe) = midir::MidiOutput::new("TimeCircleMidi") {
-            let ports = midi_out_probe.ports();
-            if let Some(port) = ports.get(port_idx) {
-                if let Ok(conn) = midi_out_probe.connect(port, "TimeCircleOut") {
-                    if let Ok(ref eng) = self.audio {
-                        if let Ok(mut lock) = eng.shared_data.lock() {
-                            lock.midi_out = Some(conn);
-                        }
-                    }
-                    self.selected_midi_port = Some(port_idx);
-                }
-            }
         }
     }
 }
@@ -99,11 +69,8 @@ impl eframe::App for TimeCircleApp {
         // Bottom Status / Message Bar
         egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if let Ok(ref eng) = self.audio {
-                    let sf_name = eng.soundfont_name.lock().map(|g| g.clone()).unwrap_or_default();
-                    ui.label(format!("SoundFont: {}", sf_name));
-                    ui.separator();
-                }
+                ui.label("SoundFont: Built-in GM SoundFont");
+                ui.separator();
                 if let Some((ref msg, _)) = self.export_status_message {
                     ui.colored_label(Color32::from_rgb(100, 255, 160), msg);
                 } else {
@@ -237,20 +204,6 @@ impl TimeCircleApp {
                         }
                         Err(e) => {
                             self.export_status_message = Some((format!("Export failed: {}", e), 5.0));
-                        }
-                    }
-                }
-            }
-
-            // SoundFont Load Button
-            if ui.button("📁 Load .SF2").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("SoundFont 2.0", &["sf2"])
-                    .pick_file()
-                {
-                    if let Ok(ref eng) = self.audio {
-                        if let Err(e) = eng.load_soundfont_from_file(&path) {
-                            self.export_status_message = Some((format!("SF2 Error: {}", e), 5.0));
                         }
                     }
                 }
@@ -728,35 +681,6 @@ impl TimeCircleApp {
                 ui.add(egui::Slider::new(&mut self.spice_level, 0.0..=1.0).text(""));
             });
             ui.weak("Controls frequency of substitutions (#IVdim7, ii-V, 9ths, 13ths) when clicking Mutate.");
-        });
-
-        ui.add_space(6.0);
-
-        // External MIDI Output Card
-        ui.group(|ui| {
-            ui.strong("🔌 External MIDI Out");
-            if self.midi_port_names.is_empty() {
-                ui.weak("No external MIDI ports found (IAC Driver / USB MIDI).");
-            } else {
-                let current_name = self.selected_midi_port
-                    .and_then(|idx| self.midi_port_names.get(idx))
-                    .map(|s| s.as_str())
-                    .unwrap_or("None (Internal Synth)");
-
-                let mut selected_to_connect = None;
-                egui::ComboBox::from_id_salt("midi_port_combo")
-                    .selected_text(current_name)
-                    .show_ui(ui, |ui| {
-                        for (idx, name) in self.midi_port_names.iter().enumerate() {
-                            if ui.selectable_label(self.selected_midi_port == Some(idx), name).clicked() {
-                                selected_to_connect = Some(idx);
-                            }
-                        }
-                    });
-                if let Some(idx) = selected_to_connect {
-                    self.connect_midi_port(idx);
-                }
-            }
         });
     }
 }
