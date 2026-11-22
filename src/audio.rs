@@ -17,7 +17,6 @@ pub struct AudioEngine {
     pub total_ticks: Arc<AtomicU32>,
     pub shared_data: Arc<Mutex<AudioSharedData>>,
     _stream: Option<cpal::Stream>,
-    pub soundfont_name: Arc<Mutex<String>>,
 }
 
 pub struct AudioSharedData {
@@ -28,7 +27,6 @@ pub struct AudioSharedData {
     pub bass_instrument: u8,
     pub preview_notes: Vec<u8>,
     pub preview_trigger: bool,
-    pub midi_out: Option<midir::MidiOutputConnection>,
 }
 
 impl AudioEngine {
@@ -36,7 +34,6 @@ impl AudioEngine {
         let is_playing = Arc::new(AtomicBool::new(false));
         let current_tick = Arc::new(AtomicU32::new(0));
         let total_ticks = Arc::new(AtomicU32::new(12 * TICKS_PER_BAR));
-        let soundfont_name = Arc::new(Mutex::new("Built-in GM SoundFont".to_string()));
 
         let shared_data = Arc::new(Mutex::new(AudioSharedData {
             notes: Vec::new(),
@@ -46,7 +43,6 @@ impl AudioEngine {
             bass_instrument: 32,
             preview_notes: Vec::new(),
             preview_trigger: false,
-            midi_out: None,
         }));
 
         // Build in-memory SF2
@@ -122,7 +118,6 @@ impl AudioEngine {
             total_ticks,
             shared_data,
             _stream: Some(stream),
-            soundfont_name,
         })
     }
 
@@ -166,18 +161,6 @@ impl AudioEngine {
             lock.preview_notes = notes;
             lock.preview_trigger = true;
         }
-    }
-
-    pub fn load_soundfont_from_file(&self, path: &std::path::Path) -> Result<(), String> {
-        let mut file = std::fs::File::open(path).map_err(|e| format!("Could not open file: {}", e))?;
-        let _sf = SoundFont::new(&mut file).map_err(|e| format!("Invalid SoundFont file: {:?}", e))?;
-        // Update soundfont name
-        if let Ok(mut name) = self.soundfont_name.lock() {
-            if let Some(file_name) = path.file_name() {
-                *name = file_name.to_string_lossy().to_string();
-            }
-        }
-        Ok(())
     }
 }
 
@@ -267,16 +250,10 @@ fn render_audio_block(
 
             for (ch, note, vel) in triggered_ons {
                 synth.note_on(ch as i32, note as i32, vel as i32);
-                if let Some(ref mut midi_out) = data.midi_out {
-                    let _ = midi_out.send(&[0x90 | (ch & 0x0F), note, vel]);
-                }
             }
 
             for (ch, note) in triggered_offs {
                 synth.note_off(ch as i32, note as i32);
-                if let Some(ref mut midi_out) = data.midi_out {
-                    let _ = midi_out.send(&[0x80 | (ch & 0x0F), note, 0]);
-                }
             }
 
             current_tick.store(next_tick, Ordering::Relaxed);
