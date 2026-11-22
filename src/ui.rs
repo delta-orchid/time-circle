@@ -78,7 +78,17 @@ impl eframe::App for TimeCircleApp {
         // Bottom Status / Message Bar
         egui::TopBottomPanel::bottom("bottom_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("SoundFont: Built-in GM SoundFont");
+                if let Err(ref err) = self.audio {
+                    ui.colored_label(Color32::from_rgb(255, 90, 90), format!("⚠️ Audio: {}", err));
+                    if ui.button("Retry Audio").clicked() {
+                        self.audio = AudioEngine::new();
+                        if let Ok(ref eng) = self.audio {
+                            eng.update_arrangement(&self.prog, &self.settings);
+                        }
+                    }
+                } else {
+                    ui.label("SoundFont: Built-in GM SoundFont");
+                }
                 ui.separator();
 
                 if self.mcp_bridge.is_connected() {
@@ -126,6 +136,12 @@ impl TimeCircleApp {
             let is_playing = self.audio.as_ref().map(|a| a.is_playing()).unwrap_or(false);
 
             if ui.button(if is_playing { "⏸ Pause" } else { "▶ Play" }).clicked() {
+                if self.audio.is_err() {
+                    self.audio = AudioEngine::new();
+                    if let Ok(ref eng) = self.audio {
+                        eng.update_arrangement(&self.prog, &self.settings);
+                    }
+                }
                 if let Ok(ref eng) = self.audio {
                     eng.set_playing(!is_playing);
                 }
@@ -612,6 +628,12 @@ impl TimeCircleApp {
                     });
 
                 if ui.button("🔊 Audition").clicked() {
+                    if self.audio.is_err() {
+                        self.audio = AudioEngine::new();
+                        if let Ok(ref eng) = self.audio {
+                            eng.update_arrangement(&self.prog, &self.settings);
+                        }
+                    }
                     if let Ok(ref eng) = self.audio {
                         eng.preview_chord(&cur_chord);
                     }
