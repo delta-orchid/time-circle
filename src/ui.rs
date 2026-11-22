@@ -9,8 +9,8 @@ use crate::arranger::{
 };
 use crate::audio::AudioEngine;
 use crate::theory::{
-    mutate_progression, mutate_turnaround, BluesFormPreset, Chord, ChordQuality,
-    PitchClass, Progression,
+    degree_presets_for_category, mutate_progression, mutate_turnaround, FormCategory, FormPreset,
+    Chord, ChordQuality, PitchClass, Progression,
 };
 
 pub struct TimeCircleApp {
@@ -26,7 +26,7 @@ pub struct TimeCircleApp {
 
 impl TimeCircleApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let prog = Progression::new_preset(PitchClass::A, BluesFormPreset::Standard12);
+        let prog = Progression::new_preset(PitchClass::A, FormPreset::Standard12);
         let settings = ArrangerSettings::default();
 
         let audio = AudioEngine::new();
@@ -150,17 +150,23 @@ impl TimeCircleApp {
                     }
                 });
 
-            // Preset Selector
+            // Preset Selector (Categorized)
             ui.label("Form:");
             egui::ComboBox::from_id_salt("form_preset")
                 .selected_text(self.prog.preset.name())
                 .show_ui(ui, |ui| {
-                    for preset in BluesFormPreset::ALL {
-                        if ui.selectable_value(&mut self.prog.preset, preset, preset.name()).clicked() {
-                            self.prog = Progression::new_preset(self.prog.key, preset);
-                            self.selected_bar = 0;
-                            self.selected_slot = 0;
-                            self.sync_audio_arrangement();
+                    for (cat_idx, category) in FormCategory::ALL.iter().enumerate() {
+                        if cat_idx > 0 {
+                            ui.separator();
+                        }
+                        ui.colored_label(Color32::from_rgb(120, 180, 240), format!("— {} —", category.name()));
+                        for preset in FormPreset::presets_for_category(*category) {
+                            if ui.selectable_value(&mut self.prog.preset, preset, preset.name()).clicked() {
+                                self.prog = Progression::new_preset(self.prog.key, preset);
+                                self.selected_bar = 0;
+                                self.selected_slot = 0;
+                                self.sync_audio_arrangement();
+                            }
                         }
                     }
                 });
@@ -168,14 +174,20 @@ impl TimeCircleApp {
             ui.separator();
 
             // Generator Buttons
-            if ui.button("⚡ Mutate").on_hover_text("Apply blues substitutions and extensions").clicked() {
+            if ui.button("⚡ Mutate").on_hover_text("Apply harmonic substitutions and chord extensions").clicked() {
                 mutate_progression(&mut self.prog, self.spice_level);
                 self.sync_audio_arrangement();
             }
 
-            if ui.button("🔄 Turnaround").on_hover_text("Generate a classic turnaround in the final bars").clicked() {
-                mutate_turnaround(&mut self.prog);
-                self.sync_audio_arrangement();
+            let is_blues = self.prog.preset.category() == FormCategory::Blues;
+            let turnaround_btn = ui.add_enabled(is_blues, egui::Button::new("🔄 Turnaround"));
+            if is_blues {
+                if turnaround_btn.on_hover_text("Generate a classic turnaround in the final bars").clicked() {
+                    mutate_turnaround(&mut self.prog);
+                    self.sync_audio_arrangement();
+                }
+            } else {
+                turnaround_btn.on_hover_text("Turnaround cadences are only available on Blues forms");
             }
 
             ui.separator();
@@ -185,9 +197,14 @@ impl TimeCircleApp {
             ui.add(egui::DragValue::new(&mut self.chorus_export_count).range(1..=16));
 
             if ui.button("💾 Export .mid").clicked() {
+                let category_prefix = match self.prog.preset.category() {
+                    FormCategory::Blues => "blues",
+                    FormCategory::PopRock => "pop_rock",
+                    FormCategory::SoulRnB => "soul_rnb",
+                };
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Standard MIDI File", &["mid", "midi"])
-                    .set_file_name(&format!("blues_{}.mid", self.prog.key.name(false).to_lowercase()))
+                    .set_file_name(&format!("{}_{}.mid", category_prefix, self.prog.key.name(false).to_lowercase()))
                     .save_file()
                 {
                     match crate::midi_export::export_smf_file(
@@ -215,7 +232,7 @@ impl TimeCircleApp {
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click());
         let rect = response.rect;
         let center = rect.center();
-        let radius = (rect.width().min(rect.height()) * 0.46).max(80.0);
+        let radius = (rect.width().min(rect.height()) * 0.43).max(80.0);
 
         let total_bars = self.prog.bars.len();
         let total_ticks = (total_bars as u32) * TICKS_PER_BAR;
@@ -339,6 +356,32 @@ impl TimeCircleApp {
                         Color32::from_rgba_unmultiplied(255, 255, 255, 140),
                     );
                 }
+            }
+
+            // Section label badge if present (e.g. A: VERSE, B: CHORUS, A1, B: BRIDGE)
+            if let Some(label) = self.prog.preset.section_label(bar_idx) {
+                let badge_r = r_outer + 15.0;
+                let badge_ang = start_ang + (bar_angle * 0.5);
+                let badge_pos = center + vec2(badge_ang.cos() * badge_r, badge_ang.sin() * badge_r);
+
+                let font = FontId::new(9.5, FontFamily::Proportional);
+                let text_shape = painter.text(
+                    badge_pos,
+                    Align2::CENTER_CENTER,
+                    label,
+                    font.clone(),
+                    Color32::from_rgb(255, 230, 130),
+                );
+                let bg_rect = text_shape.expand(3.0);
+                painter.rect_filled(bg_rect, 3.0, Color32::from_rgba_unmultiplied(22, 26, 34, 230));
+                painter.rect_stroke(bg_rect, 3.0, Stroke::new(1.0_f32, Color32::from_rgb(200, 160, 60)), egui::StrokeKind::Middle);
+                painter.text(
+                    badge_pos,
+                    Align2::CENTER_CENTER,
+                    label,
+                    font,
+                    Color32::from_rgb(255, 230, 130),
+                );
             }
         }
 
@@ -473,23 +516,11 @@ impl TimeCircleApp {
 
             ui.add_space(4.0);
 
-            // One-tap Blues Degree Shortcuts
-            ui.label("Blues Degree Presets:");
+            // One-tap Category-Adaptive Degree Shortcuts
+            let category = self.prog.preset.category();
+            ui.label(format!("{} Degree Presets:", category.name()));
             ui.horizontal_wrapped(|ui| {
-                let key = self.prog.key;
-                let degrees = [
-                    ("I7", key, ChordQuality::Dom7),
-                    ("I9", key, ChordQuality::Dom9),
-                    ("IV7", key.transpose(5), ChordQuality::Dom7),
-                    ("IV9", key.transpose(5), ChordQuality::Dom9),
-                    ("#IVdim7", key.transpose(6), ChordQuality::Dim7),
-                    ("V7", key.transpose(7), ChordQuality::Dom7),
-                    ("V7alt", key.transpose(7), ChordQuality::Dom7Alt),
-                    ("ii7", key.transpose(2), ChordQuality::Min7),
-                    ("VI7", key.transpose(9), ChordQuality::Dom7),
-                    ("bII7", key.transpose(1), ChordQuality::Dom7),
-                ];
-
+                let degrees = degree_presets_for_category(category, self.prog.key);
                 for (name, root, quality) in degrees {
                     if ui.button(name).clicked() {
                         cur_chord = Chord::new(root, quality);
@@ -514,11 +545,21 @@ impl TimeCircleApp {
                     });
 
                 ui.label("Quality:");
+                let cur_qual_str = match cur_chord.quality {
+                    ChordQuality::Maj => "Maj (triad)",
+                    ChordQuality::Min => "m (minor)",
+                    _ => cur_chord.quality.symbol(),
+                };
                 egui::ComboBox::from_id_salt("chord_qual_sel")
-                    .selected_text(cur_chord.quality.symbol())
+                    .selected_text(cur_qual_str)
                     .show_ui(ui, |ui| {
                         for q in ChordQuality::ALL {
-                            if ui.selectable_value(&mut cur_chord.quality, q, q.symbol()).clicked() {
+                            let label = match q {
+                                ChordQuality::Maj => "Maj (triad)",
+                                ChordQuality::Min => "m (minor)",
+                                _ => q.symbol(),
+                            };
+                            if ui.selectable_value(&mut cur_chord.quality, q, label).clicked() {
                                 changed = true;
                             }
                         }
@@ -685,15 +726,19 @@ impl TimeCircleApp {
     }
 }
 
-/// Color codes chords according to functional blues harmony
+/// Color codes chords according to functional harmony across Blues, Pop/Rock, and Soul
 fn chord_harmonic_color(root: PitchClass, key: PitchClass) -> Color32 {
     let diff = (root.semitones() as i32 - key.semitones() as i32).rem_euclid(12);
     match diff {
-        0 => Color32::from_rgb(32, 105, 145),   // Tonic (I) -> Sapphire Blue
-        5 => Color32::from_rgb(180, 115, 30),   // Subdominant (IV) -> Amber Orange
+        0 => Color32::from_rgb(32, 105, 145),   // Tonic (I / i) -> Sapphire Blue
+        2 => Color32::from_rgb(45, 130, 95),    // Supertonic (ii) -> Emerald Teal
+        3 | 4 => Color32::from_rgb(155, 125, 45), // Mediant (bIII / iii / III) -> Warm Ochre
+        5 => Color32::from_rgb(180, 115, 30),   // Subdominant (IV / iv) -> Amber Orange
+        6 => Color32::from_rgb(140, 45, 140),   // Tritone / Passing (#IVdim7) -> Deep Purple
         7 => Color32::from_rgb(175, 45, 55),    // Dominant (V) -> Crimson Red
-        6 => Color32::from_rgb(140, 45, 140),   // #IVdim7 -> Deep Purple
-        2 | 9 => Color32::from_rgb(45, 130, 95),// ii or VI -> Emerald / Teal
+        8 => Color32::from_rgb(135, 60, 110),   // Submediant (bVI) -> Plum / Magenta
+        9 => Color32::from_rgb(40, 140, 125),   // Submediant (vi / VI) -> Seafoam Jade
+        10 => Color32::from_rgb(185, 80, 40),   // Subtonic (bVII) -> Rust / Copper
         _ => Color32::from_rgb(60, 70, 85),     // Other / Passing -> Charcoal Slate
     }
 }

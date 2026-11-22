@@ -52,16 +52,20 @@ pub enum ChordCompingStyle {
     FreddieGreenFour,
     CharlestonSyncopated,
     FunkyStabs,
+    PopEighthPulse,
+    NeoSoulSyncopated,
 }
 
 impl ChordCompingStyle {
-    pub const ALL: [ChordCompingStyle; 6] = [
+    pub const ALL: [ChordCompingStyle; 8] = [
         ChordCompingStyle::SustainedPads,
         ChordCompingStyle::ChicagoShuffleChops,
         ChordCompingStyle::Slow12_8Triplets,
         ChordCompingStyle::FreddieGreenFour,
         ChordCompingStyle::CharlestonSyncopated,
         ChordCompingStyle::FunkyStabs,
+        ChordCompingStyle::PopEighthPulse,
+        ChordCompingStyle::NeoSoulSyncopated,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -72,6 +76,8 @@ impl ChordCompingStyle {
             ChordCompingStyle::FreddieGreenFour => "Freddie Green (Four-on-Floor)",
             ChordCompingStyle::CharlestonSyncopated => "Charleston / Jazz Syncopated",
             ChordCompingStyle::FunkyStabs => "New Orleans Funky Stabs",
+            ChordCompingStyle::PopEighthPulse => "Pop / Rock 8th-Note Pulse",
+            ChordCompingStyle::NeoSoulSyncopated => "Soul / R&B Neo-Soul Pocket",
         }
     }
 }
@@ -106,14 +112,18 @@ pub enum BassStyle {
     ShuffleBoogie,
     Slow12_8Blues,
     RootFifthTwoFeel,
+    EighthRootDrive,
+    MotownSoulGroove,
 }
 
 impl BassStyle {
-    pub const ALL: [BassStyle; 4] = [
+    pub const ALL: [BassStyle; 6] = [
         BassStyle::WalkingBass,
         BassStyle::ShuffleBoogie,
         BassStyle::Slow12_8Blues,
         BassStyle::RootFifthTwoFeel,
+        BassStyle::EighthRootDrive,
+        BassStyle::MotownSoulGroove,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -122,6 +132,8 @@ impl BassStyle {
             BassStyle::ShuffleBoogie => "Shuffle Boogie (8th Swing)",
             BassStyle::Slow12_8Blues => "Slow 12/8 Blues Bass",
             BassStyle::RootFifthTwoFeel => "Two-Feel (Root - Fifth)",
+            BassStyle::EighthRootDrive => "Rock / Pop Driving 8ths",
+            BassStyle::MotownSoulGroove => "Motown / Soul Syncopated",
         }
     }
 }
@@ -134,16 +146,22 @@ pub enum DrumBeatPreset {
     NewOrleansFunk,
     JazzBluesSwing,
     StraightRockBlues,
+    PopRockBackbeat,
+    MotownSoulBeat,
+    NeoSoulPocket,
 }
 
 impl DrumBeatPreset {
-    pub const ALL: [DrumBeatPreset; 6] = [
+    pub const ALL: [DrumBeatPreset; 9] = [
         DrumBeatPreset::ChicagoShuffle,
         DrumBeatPreset::Slow12_8Blues,
         DrumBeatPreset::TexasSRVShuffle,
         DrumBeatPreset::NewOrleansFunk,
         DrumBeatPreset::JazzBluesSwing,
         DrumBeatPreset::StraightRockBlues,
+        DrumBeatPreset::PopRockBackbeat,
+        DrumBeatPreset::MotownSoulBeat,
+        DrumBeatPreset::NeoSoulPocket,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -154,6 +172,9 @@ impl DrumBeatPreset {
             DrumBeatPreset::NewOrleansFunk => "New Orleans Second Line Funk",
             DrumBeatPreset::JazzBluesSwing => "Jazz Blues Swing",
             DrumBeatPreset::StraightRockBlues => "Straight Rock Blues",
+            DrumBeatPreset::PopRockBackbeat => "Pop / Classic Rock 8th Backbeat",
+            DrumBeatPreset::MotownSoulBeat => "Motown Four-on-the-Floor Soul",
+            DrumBeatPreset::NeoSoulPocket => "Neo-Soul / R&B Laid-Back Pocket",
         }
     }
 }
@@ -164,11 +185,11 @@ pub const GM_DRUM_RIMSHOT: u8 = 37;
 pub const GM_DRUM_SNARE: u8 = 38;
 pub const GM_DRUM_CL_HAT: u8 = 42;
 pub const GM_DRUM_PEDAL_HAT: u8 = 44;
-pub const GM_DRUM_OP_HAT: u8 = 46;
+pub const _GM_DRUM_OP_HAT: u8 = 46;
 pub const GM_DRUM_LOW_TOM: u8 = 45;
 pub const GM_DRUM_MID_TOM: u8 = 47;
 pub const GM_DRUM_HIGH_TOM: u8 = 50;
-pub const GM_DRUM_CRASH: u8 = 49;
+pub const _GM_DRUM_CRASH: u8 = 49;
 pub const GM_DRUM_RIDE: u8 = 51;
 pub const GM_DRUM_RIDE_BELL: u8 = 53;
 
@@ -438,6 +459,74 @@ fn generate_bar_chords(
                 }
             }
         }
+        ChordCompingStyle::PopEighthPulse => {
+            // Steady driving 8th-note pulse
+            for beat in 0..4 {
+                let beat_tick = bar_start + beat * TICKS_PER_BEAT;
+                let off_tick = swung_offbeat_tick(beat_tick, swing);
+                let chord = bar.get_chord_at_beat(beat as usize);
+                let chord_notes = chord.voicing(62);
+
+                let on_vel = match beat {
+                    0 => (vel as f32 * 1.05).min(127.0) as u8,
+                    2 => vel,
+                    _ => (vel as f32 * 0.9) as u8,
+                };
+                let off_vel = (vel as f32 * 0.78) as u8;
+
+                for &note in &chord_notes {
+                    notes.push(ScheduledNote {
+                        tick: beat_tick,
+                        duration_ticks: (TICKS_PER_BEAT as f32 * swing * 0.75) as u32,
+                        channel: 0,
+                        note,
+                        velocity: on_vel,
+                    });
+                    notes.push(ScheduledNote {
+                        tick: off_tick,
+                        duration_ticks: (TICKS_PER_BEAT as f32 * (1.0 - swing) * 0.75) as u32,
+                        channel: 0,
+                        note,
+                        velocity: off_vel,
+                    });
+                }
+            }
+        }
+        ChordCompingStyle::NeoSoulSyncopated => {
+            // Lush beat 1 + anticipated syncopation on and-of-2 and pickup on and-of-4
+            let c1 = bar.get_chord_at_beat(0);
+            for n in c1.voicing(62) {
+                notes.push(ScheduledNote {
+                    tick: bar_start,
+                    duration_ticks: (TICKS_PER_BEAT as f32 * 1.3) as u32,
+                    channel: 0,
+                    note: n,
+                    velocity: (vel as f32 * 0.95) as u8,
+                });
+            }
+            let and_beat2 = swung_offbeat_tick(bar_start + TICKS_PER_BEAT, swing);
+            let c2 = bar.get_chord_at_beat(1);
+            for n in c2.voicing(63) {
+                notes.push(ScheduledNote {
+                    tick: and_beat2,
+                    duration_ticks: (TICKS_PER_BEAT as f32 * 1.1) as u32,
+                    channel: 0,
+                    note: n,
+                    velocity: (vel as f32 * 1.05).min(127.0) as u8,
+                });
+            }
+            let and_beat4 = swung_offbeat_tick(bar_start + 3 * TICKS_PER_BEAT, swing);
+            let c4 = bar.get_chord_at_beat(3);
+            for n in c4.voicing(62) {
+                notes.push(ScheduledNote {
+                    tick: and_beat4,
+                    duration_ticks: (TICKS_PER_BEAT as f32 * (1.0 - swing) * 0.9) as u32,
+                    channel: 0,
+                    note: n,
+                    velocity: (vel as f32 * 0.75) as u8,
+                });
+            }
+        }
     }
 }
 
@@ -471,7 +560,7 @@ fn generate_bar_bass(
                     0 => root,
                     1 => {
                         // Major 3rd or Minor 3rd depending on quality
-                        let is_min = matches!(chord.quality, crate::theory::ChordQuality::Min7 | crate::theory::ChordQuality::Min6 | crate::theory::ChordQuality::Min9 | crate::theory::ChordQuality::HalfDim7 | crate::theory::ChordQuality::Dim7);
+                        let is_min = matches!(chord.quality, crate::theory::ChordQuality::Min | crate::theory::ChordQuality::Min7 | crate::theory::ChordQuality::Min6 | crate::theory::ChordQuality::Min9 | crate::theory::ChordQuality::HalfDim7 | crate::theory::ChordQuality::Dim7);
                         root + if is_min { 3 } else { 4 }
                     }
                     2 => root + 7, // Perfect 5th
@@ -567,6 +656,97 @@ fn generate_bar_bass(
                 note: (r2 - 12).clamp(28, 55),
                 velocity: vel,
             });
+        }
+        BassStyle::EighthRootDrive => {
+            // Driving 8th-note rock/pop bass line
+            for beat in 0..4 {
+                let beat_tick = bar_start + beat * TICKS_PER_BEAT;
+                let off_tick = swung_offbeat_tick(beat_tick, swing);
+                let chord = bar.get_chord_at_beat(beat as usize);
+                let root = bass_root_midi(chord.root);
+
+                let (p1, p2) = match beat {
+                    3 => (root, if target_next_root > root { target_next_root - 1 } else { target_next_root + 1 }),
+                    _ => (root, root),
+                };
+
+                notes.push(ScheduledNote {
+                    tick: beat_tick,
+                    duration_ticks: (TICKS_PER_BEAT as f32 * swing * 0.8) as u32,
+                    channel: 1,
+                    note: p1.clamp(28, 55),
+                    velocity: vel,
+                });
+                notes.push(ScheduledNote {
+                    tick: off_tick,
+                    duration_ticks: (TICKS_PER_BEAT as f32 * (1.0 - swing) * 0.8) as u32,
+                    channel: 1,
+                    note: p2.clamp(28, 55),
+                    velocity: (vel as f32 * 0.88) as u8,
+                });
+            }
+        }
+        BassStyle::MotownSoulGroove => {
+            // James Jamerson style syncopated soul line:
+            // Beat 1: Root (dotted quarter)
+            // Beat 2-and: 5th
+            // Beat 3: 6th
+            // Beat 4 & 4-and: Chromatic approach to next root
+            for beat in 0..4 {
+                let beat_tick = bar_start + beat * TICKS_PER_BEAT;
+                let chord = bar.get_chord_at_beat(beat as usize);
+                let root = bass_root_midi(chord.root);
+
+                match beat {
+                    0 => {
+                        notes.push(ScheduledNote {
+                            tick: beat_tick,
+                            duration_ticks: (TICKS_PER_BEAT as f32 * 1.3) as u32,
+                            channel: 1,
+                            note: root.clamp(28, 55),
+                            velocity: (vel as f32 * 1.05).min(127.0) as u8,
+                        });
+                    }
+                    1 => {
+                        let off_tick = swung_offbeat_tick(beat_tick, swing);
+                        notes.push(ScheduledNote {
+                            tick: off_tick,
+                            duration_ticks: (TICKS_PER_BEAT as f32 * (1.0 - swing) * 0.9) as u32,
+                            channel: 1,
+                            note: (root + 7).clamp(28, 55),
+                            velocity: (vel as f32 * 0.95) as u8,
+                        });
+                    }
+                    2 => {
+                        notes.push(ScheduledNote {
+                            tick: beat_tick,
+                            duration_ticks: (TICKS_PER_BEAT as f32 * 0.8) as u32,
+                            channel: 1,
+                            note: (root + 9).clamp(28, 55),
+                            velocity: vel,
+                        });
+                    }
+                    3 => {
+                        let off_tick = swung_offbeat_tick(beat_tick, swing);
+                        let approach = if target_next_root > root { target_next_root - 1 } else { target_next_root + 1 };
+                        notes.push(ScheduledNote {
+                            tick: beat_tick,
+                            duration_ticks: (TICKS_PER_BEAT as f32 * swing * 0.8) as u32,
+                            channel: 1,
+                            note: (root + 7).clamp(28, 55),
+                            velocity: (vel as f32 * 0.9) as u8,
+                        });
+                        notes.push(ScheduledNote {
+                            tick: off_tick,
+                            duration_ticks: (TICKS_PER_BEAT as f32 * (1.0 - swing) * 0.8) as u32,
+                            channel: 1,
+                            note: approach.clamp(28, 55),
+                            velocity: vel,
+                        });
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }
@@ -756,6 +936,72 @@ fn generate_bar_drums(
                 }
                 if beat == 1 || beat == 3 {
                     add_drum(notes, b_tick, GM_DRUM_SNARE, (vel as f32 * 1.15).min(127.0) as u8);
+                }
+            }
+        }
+        DrumBeatPreset::PopRockBackbeat => {
+            let half_beat = TICKS_PER_BEAT / 2;
+            for beat in 0..4 {
+                let b_tick = bar_start + beat * TICKS_PER_BEAT;
+                let off_tick = b_tick + half_beat;
+
+                // Steady 8th hats
+                add_drum(notes, b_tick, GM_DRUM_CL_HAT, (vel as f32 * 0.92) as u8);
+                add_drum(notes, off_tick, GM_DRUM_CL_HAT, (vel as f32 * 0.75) as u8);
+
+                // Kick on 1, 3, and offbeat of 3
+                if beat == 0 || beat == 2 {
+                    add_drum(notes, b_tick, GM_DRUM_KICK, vel);
+                }
+                if beat == 2 {
+                    add_drum(notes, off_tick, GM_DRUM_KICK, (vel as f32 * 0.88) as u8);
+                }
+
+                // Snare on 2 and 4
+                if beat == 1 || beat == 3 {
+                    add_drum(notes, b_tick, GM_DRUM_SNARE, (vel as f32 * 1.15).min(127.0) as u8);
+                }
+            }
+        }
+        DrumBeatPreset::MotownSoulBeat => {
+            for beat in 0..4 {
+                let b_tick = bar_start + beat * TICKS_PER_BEAT;
+                let off_tick = swung_offbeat_tick(b_tick, swing);
+
+                // Four-on-the-floor kick
+                add_drum(notes, b_tick, GM_DRUM_KICK, (vel as f32 * 0.95) as u8);
+
+                // Driving hat 8ths
+                add_drum(notes, b_tick, GM_DRUM_CL_HAT, (vel as f32 * 0.85) as u8);
+                add_drum(notes, off_tick, GM_DRUM_CL_HAT, (vel as f32 * 0.7) as u8);
+
+                // Solid snare on 2 and 4
+                if beat == 1 || beat == 3 {
+                    add_drum(notes, b_tick, GM_DRUM_SNARE, (vel as f32 * 1.2).min(127.0) as u8);
+                }
+            }
+        }
+        DrumBeatPreset::NeoSoulPocket => {
+            for beat in 0..4 {
+                let b_tick = bar_start + beat * TICKS_PER_BEAT;
+                let off_tick = swung_offbeat_tick(b_tick, swing);
+
+                // Closed hat with light dynamics
+                add_drum(notes, b_tick, GM_DRUM_CL_HAT, (vel as f32 * 0.82) as u8);
+                add_drum(notes, off_tick, GM_DRUM_CL_HAT, (vel as f32 * 0.65) as u8);
+
+                // Laid-back kick pattern (1, and-of-2, and 3-and)
+                if beat == 0 {
+                    add_drum(notes, b_tick, GM_DRUM_KICK, vel);
+                } else if beat == 1 {
+                    add_drum(notes, off_tick, GM_DRUM_KICK, (vel as f32 * 0.8) as u8);
+                } else if beat == 2 {
+                    add_drum(notes, off_tick, GM_DRUM_KICK, (vel as f32 * 0.75) as u8);
+                }
+
+                // Rimshot / snare on 2 and 4
+                if beat == 1 || beat == 3 {
+                    add_drum(notes, b_tick, GM_DRUM_RIMSHOT, (vel as f32 * 1.1).min(127.0) as u8);
                 }
             }
         }
