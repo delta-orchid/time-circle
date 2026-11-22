@@ -25,6 +25,7 @@ pub struct AudioSharedData {
     pub total_ticks: u32,
     pub chord_instrument: u8,
     pub bass_instrument: u8,
+    pub drum_kit: u8,
     pub preview_notes: Vec<u8>,
     pub preview_trigger: bool,
 }
@@ -41,6 +42,7 @@ impl AudioEngine {
             total_ticks: 12 * TICKS_PER_BAR,
             chord_instrument: 0,
             bass_instrument: 32,
+            drum_kit: 0,
             preview_notes: Vec::new(),
             preview_trigger: false,
         }));
@@ -82,6 +84,7 @@ impl AudioEngine {
         let mut right_buf = vec![0.0f32; 512];
         let mut last_prog_chord = 255u8;
         let mut last_prog_bass = 255u8;
+        let mut last_prog_drum = 255u8;
         let mut play_head_sample = 0.0f64;
 
         let stream = match config.sample_format() {
@@ -100,6 +103,7 @@ impl AudioEngine {
                         &shared_data_clone,
                         &mut last_prog_chord,
                         &mut last_prog_bass,
+                        &mut last_prog_drum,
                         &mut play_head_sample,
                     );
                 },
@@ -152,6 +156,7 @@ impl AudioEngine {
             lock.total_ticks = total;
             lock.chord_instrument = settings.chord_instrument.program_number();
             lock.bass_instrument = settings.bass_instrument.program_number();
+            lock.drum_kit = settings.drum_kit.program_number();
         }
     }
 
@@ -176,6 +181,7 @@ fn render_audio_block(
     shared_data: &Arc<Mutex<AudioSharedData>>,
     last_prog_chord: &mut u8,
     last_prog_bass: &mut u8,
+    last_prog_drum: &mut u8,
     _play_head_sample: &mut f64,
 ) {
     let num_frames = output.len() / channels;
@@ -195,6 +201,10 @@ fn render_audio_block(
         if data.bass_instrument != *last_prog_bass {
             *last_prog_bass = data.bass_instrument;
             synth.process_midi_message(1, 0xC0, *last_prog_bass as i32, 0);
+        }
+        if data.drum_kit != *last_prog_drum {
+            *last_prog_drum = data.drum_kit;
+            synth.process_midi_message(9, 0xC0, *last_prog_drum as i32, 0);
         }
 
         // Preview trigger

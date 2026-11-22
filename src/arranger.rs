@@ -18,24 +18,42 @@ pub struct ScheduledNote {
 pub enum ChordInstrument {
     GrandPiano = 0,
     ElectricPiano = 4,
+    Clavinet = 7,
+    Vibraphone = 11,
     DrawbarOrgan = 16,
+    AcousticGuitar = 24,
     ElectricGuitar = 27,
+    StringEnsemble = 48,
+    BrassSection = 61,
+    SynthPad = 89,
 }
 
 impl ChordInstrument {
-    pub const ALL: [ChordInstrument; 4] = [
+    pub const ALL: [ChordInstrument; 10] = [
         ChordInstrument::GrandPiano,
         ChordInstrument::ElectricPiano,
+        ChordInstrument::Clavinet,
+        ChordInstrument::Vibraphone,
         ChordInstrument::DrawbarOrgan,
+        ChordInstrument::AcousticGuitar,
         ChordInstrument::ElectricGuitar,
+        ChordInstrument::StringEnsemble,
+        ChordInstrument::BrassSection,
+        ChordInstrument::SynthPad,
     ];
 
     pub fn name(&self) -> &'static str {
         match self {
             ChordInstrument::GrandPiano => "Acoustic Grand Piano",
             ChordInstrument::ElectricPiano => "Rhodes Electric Piano",
+            ChordInstrument::Clavinet => "Clavinet D6",
+            ChordInstrument::Vibraphone => "Vibraphone / Jazz Vibes",
             ChordInstrument::DrawbarOrgan => "Hammond B3 Organ",
+            ChordInstrument::AcousticGuitar => "Acoustic Guitar",
             ChordInstrument::ElectricGuitar => "Electric Guitar",
+            ChordInstrument::StringEnsemble => "String Ensemble",
+            ChordInstrument::BrassSection => "Brass Section / Stabs",
+            ChordInstrument::SynthPad => "Warm Analog Synth Pad",
         }
     }
 
@@ -86,18 +104,36 @@ impl ChordCompingStyle {
 pub enum BassInstrument {
     UprightBass = 32,
     ElectricBass = 33,
+    PickedBass = 34,
+    FretlessBass = 35,
+    SlapBass = 36,
+    SynthBass = 38,
+    SubBass808 = 39,
+    AcousticTuba = 58,
 }
 
 impl BassInstrument {
-    pub const ALL: [BassInstrument; 2] = [
+    pub const ALL: [BassInstrument; 8] = [
         BassInstrument::UprightBass,
         BassInstrument::ElectricBass,
+        BassInstrument::PickedBass,
+        BassInstrument::FretlessBass,
+        BassInstrument::SlapBass,
+        BassInstrument::SynthBass,
+        BassInstrument::SubBass808,
+        BassInstrument::AcousticTuba,
     ];
 
     pub fn name(&self) -> &'static str {
         match self {
             BassInstrument::UprightBass => "Upright Acoustic Bass",
             BassInstrument::ElectricBass => "Fingered Electric Bass",
+            BassInstrument::PickedBass => "Picked Electric Bass",
+            BassInstrument::FretlessBass => "Fretless Bass",
+            BassInstrument::SlapBass => "Slap & Pop Bass",
+            BassInstrument::SynthBass => "Moog Synth Bass",
+            BassInstrument::SubBass808 => "808 Sub Bass",
+            BassInstrument::AcousticTuba => "Acoustic Tuba / Low Brass",
         }
     }
 
@@ -193,6 +229,93 @@ pub const _GM_DRUM_CRASH: u8 = 49;
 pub const GM_DRUM_RIDE: u8 = 51;
 pub const GM_DRUM_RIDE_BELL: u8 = 53;
 
+// GM Percussion Notes
+pub const GM_PERC_HAND_CLAP: u8 = 39;
+pub const GM_PERC_TAMBOURINE: u8 = 54;
+pub const GM_PERC_COWBELL: u8 = 56;
+pub const GM_PERC_SHAKER: u8 = 70;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DrumKit {
+    StandardAcoustic = 0,
+    RockPower = 16,
+    VintageFunk = 24,
+    TR808Electronic = 25,
+    LoFiHipHop = 32,
+    JazzBrushes = 40,
+}
+
+impl DrumKit {
+    pub const ALL: [DrumKit; 6] = [
+        DrumKit::StandardAcoustic,
+        DrumKit::RockPower,
+        DrumKit::VintageFunk,
+        DrumKit::TR808Electronic,
+        DrumKit::LoFiHipHop,
+        DrumKit::JazzBrushes,
+    ];
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            DrumKit::StandardAcoustic => "Standard Studio Kit",
+            DrumKit::RockPower => "Rock Arena Power Kit",
+            DrumKit::VintageFunk => "Vintage Funk Breakbeat Kit",
+            DrumKit::TR808Electronic => "TR-808 Electronic Synth Kit",
+            DrumKit::LoFiHipHop => "Lo-Fi Hip-Hop Dusty Kit",
+            DrumKit::JazzBrushes => "Jazz Brush & Sizzle Kit",
+        }
+    }
+
+    pub fn program_number(&self) -> u8 {
+        *self as u8
+    }
+}
+
+impl Default for DrumKit {
+    fn default() -> Self {
+        DrumKit::StandardAcoustic
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PercussionInstrument {
+    None,
+    Tambourine,
+    Cowbell,
+    HandClap,
+    Shaker,
+}
+
+impl PercussionInstrument {
+    pub const ALL: [PercussionInstrument; 5] = [
+        PercussionInstrument::None,
+        PercussionInstrument::Tambourine,
+        PercussionInstrument::Cowbell,
+        PercussionInstrument::HandClap,
+        PercussionInstrument::Shaker,
+    ];
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            PercussionInstrument::None => "None (Drum Kit Only)",
+            PercussionInstrument::Tambourine => "Tambourine",
+            PercussionInstrument::Cowbell => "Cowbell",
+            PercussionInstrument::HandClap => "Handclaps",
+            PercussionInstrument::Shaker => "Shaker",
+        }
+    }
+}
+
+impl Default for PercussionInstrument {
+    fn default() -> Self {
+        PercussionInstrument::None
+    }
+}
+
+fn default_percussion_vol() -> f32 {
+    0.75
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArrangerSettings {
     pub chord_instrument: ChordInstrument,
@@ -206,6 +329,12 @@ pub struct ArrangerSettings {
     pub bass_enabled: bool,
 
     pub drum_preset: DrumBeatPreset,
+    #[serde(default)]
+    pub drum_kit: DrumKit,
+    #[serde(default)]
+    pub percussion_inst: PercussionInstrument,
+    #[serde(default = "default_percussion_vol")]
+    pub percussion_volume: f32,
     pub drum_volume: f32,
     pub drum_enabled: bool,
     pub turnaround_drum_fill: bool,
@@ -228,6 +357,9 @@ impl Default for ArrangerSettings {
             bass_enabled: true,
 
             drum_preset: DrumBeatPreset::ChicagoShuffle,
+            drum_kit: DrumKit::StandardAcoustic,
+            percussion_inst: PercussionInstrument::None,
+            percussion_volume: 0.75,
             drum_volume: 0.80,
             drum_enabled: true,
             turnaround_drum_fill: true,
@@ -769,6 +901,59 @@ fn generate_bar_drums(
             velocity: v,
         });
     };
+
+    // Dedicated Percussion Layer
+    if settings.percussion_inst != PercussionInstrument::None && settings.percussion_volume > 0.0 {
+        let p_vel = (110.0 * settings.percussion_volume).clamp(20.0, 127.0) as u8;
+        match settings.percussion_inst {
+            PercussionInstrument::None => {}
+            PercussionInstrument::Tambourine => {
+                // Accents on 2 & 4 with lighter 8th-note pickup shakes
+                for b in 0..4 {
+                    let beat_tick = bar_start + b * TICKS_PER_BEAT;
+                    if b == 1 || b == 3 {
+                        add_drum(notes, beat_tick, GM_PERC_TAMBOURINE, p_vel);
+                    }
+                    let off_tick = swung_offbeat_tick(beat_tick, swing);
+                    add_drum(notes, off_tick, GM_PERC_TAMBOURINE, (p_vel as f32 * 0.55) as u8);
+                }
+            }
+            PercussionInstrument::Cowbell => {
+                // Classic syncopated cowbell groove: beats 1, 2-and, 3, 4
+                for b in 0..4 {
+                    let beat_tick = bar_start + b * TICKS_PER_BEAT;
+                    add_drum(notes, beat_tick, GM_PERC_COWBELL, (p_vel as f32 * if b % 2 == 0 { 0.95 } else { 0.80 }) as u8);
+                    if b == 1 {
+                        let sync_tick = swung_offbeat_tick(beat_tick, swing);
+                        add_drum(notes, sync_tick, GM_PERC_COWBELL, (p_vel as f32 * 0.88) as u8);
+                    }
+                }
+            }
+            PercussionInstrument::HandClap => {
+                // Crisp backbeat handclap on 2 & 4
+                for b in [1, 3] {
+                    let beat_tick = bar_start + b * TICKS_PER_BEAT;
+                    add_drum(notes, beat_tick, GM_PERC_HAND_CLAP, p_vel);
+                }
+            }
+            PercussionInstrument::Shaker => {
+                // Continuous 16th-note shaker pulse
+                let sub_div = 4;
+                let sub_ticks = TICKS_PER_BEAT / sub_div;
+                for b in 0..4 {
+                    for s in 0..sub_div {
+                        let t = bar_start + b * TICKS_PER_BEAT + s * sub_ticks;
+                        let vel_factor = match s {
+                            0 => 0.95,
+                            2 => 0.75,
+                            _ => 0.50,
+                        };
+                        add_drum(notes, t, GM_PERC_SHAKER, (p_vel as f32 * vel_factor) as u8);
+                    }
+                }
+            }
+        }
+    }
 
     // If turnaround drum fill is active on the last bar, generate a crescendo triplet snare/tom fill in beats 3 & 4
     if is_last_bar && settings.turnaround_drum_fill {
