@@ -72,22 +72,27 @@
     </div>
     <canvas id="time_circle_canvas"></canvas>
     <script>
-        // Hide loading screen once canvas gets focus or paints
+        // Hide loading screen once canvas gets focus or paints or Trunk starts
         const canvas = document.getElementById("time_circle_canvas");
         const loading = document.getElementById("loading");
-        const observer = new MutationObserver(() => {
-            if (canvas.hasAttribute("style") || canvas.width > 0) {
+
+        function hideLoading() {
+            if (loading && loading.style.display !== "none") {
                 loading.style.opacity = "0";
                 setTimeout(() => { loading.style.display = "none"; }, 400);
+            }
+        }
+
+        window.addEventListener("TrunkApplicationStarted", hideLoading);
+
+        const observer = new MutationObserver(() => {
+            if (canvas.hasAttribute("style") || canvas.width > 0) {
+                hideLoading();
             }
         });
         observer.observe(canvas, { attributes: true });
-        window.addEventListener("pointerdown", () => {
-            if (loading.style.display !== "none") {
-                loading.style.opacity = "0";
-                setTimeout(() => { loading.style.display = "none"; }, 400);
-            }
-        }, { once: true });
+
+        window.addEventListener("pointerdown", hideLoading, { once: true });
     </script>
 </body>
 </html>
