@@ -58,6 +58,25 @@ impl PitchClass {
         self as u8
     }
 
+    pub fn from_name(name: &str) -> Option<Self> {
+        let clean = name.trim();
+        match clean.to_ascii_uppercase().as_str() {
+            "C" => Some(PitchClass::C),
+            "C#" | "DB" => Some(PitchClass::Db),
+            "D" => Some(PitchClass::D),
+            "D#" | "EB" => Some(PitchClass::Eb),
+            "E" => Some(PitchClass::E),
+            "F" => Some(PitchClass::F),
+            "F#" | "GB" => Some(PitchClass::Gb),
+            "G" => Some(PitchClass::G),
+            "G#" | "AB" => Some(PitchClass::Ab),
+            "A" => Some(PitchClass::A),
+            "A#" | "BB" => Some(PitchClass::Bb),
+            "B" => Some(PitchClass::B),
+            _ => None,
+        }
+    }
+
     pub fn name(self, prefer_sharp: bool) -> &'static str {
         match self {
             PitchClass::C => "C",
@@ -173,6 +192,50 @@ impl Chord {
 
     pub fn name(&self, prefer_sharp: bool) -> String {
         format!("{}{}", self.root.name(prefer_sharp), self.quality.symbol())
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        if s.is_empty() {
+            return None;
+        }
+
+        let (root, rem) = if s.len() >= 2 {
+            if let Some(r) = PitchClass::from_name(&s[0..2]) {
+                (r, &s[2..])
+            } else if let Some(r) = PitchClass::from_name(&s[0..1]) {
+                (r, &s[1..])
+            } else {
+                return None;
+            }
+        } else if let Some(r) = PitchClass::from_name(&s[0..1]) {
+            (r, &s[1..])
+        } else {
+            return None;
+        };
+
+        let rem_lower = rem.trim().to_ascii_lowercase();
+        let quality = match rem_lower.as_str() {
+            "" | "maj" | "major" => ChordQuality::Maj,
+            "m" | "min" | "minor" => ChordQuality::Min,
+            "7" | "dom7" => ChordQuality::Dom7,
+            "9" | "dom9" => ChordQuality::Dom9,
+            "13" | "dom13" => ChordQuality::Dom13,
+            "maj7" | "m7+" | "ma7" => ChordQuality::Maj7,
+            "maj6" | "6" => ChordQuality::Maj6,
+            "m7" | "min7" => ChordQuality::Min7,
+            "m6" | "min6" => ChordQuality::Min6,
+            "m9" | "min9" => ChordQuality::Min9,
+            "m7b5" | "halfdim" | "ø" => ChordQuality::HalfDim7,
+            "dim" | "dim7" | "o" => ChordQuality::Dim7,
+            "sus4" | "sus" => ChordQuality::Sus4,
+            "7sus4" | "7sus" => ChordQuality::Dom7Sus4,
+            "add9" | "2" => ChordQuality::Add9,
+            "7alt" | "alt" => ChordQuality::Dom7Alt,
+            _ => ChordQuality::Maj,
+        };
+
+        Some(Chord::new(root, quality))
     }
 
     /// Returns MIDI note numbers centered around target pitch (e.g., C4 = 60)
@@ -338,6 +401,28 @@ impl FormPreset {
             .copied()
             .filter(|p| p.category() == category)
             .collect()
+    }
+
+    pub fn from_identifier_or_name(input: &str) -> Option<Self> {
+        let clean = input.trim();
+        for p in Self::ALL {
+            if format!("{:?}", p).eq_ignore_ascii_case(clean) {
+                return Some(p);
+            }
+            if p.name().eq_ignore_ascii_case(clean) {
+                return Some(p);
+            }
+        }
+        // Substring / simplified match
+        let s = clean.to_ascii_lowercase().replace([' ', '-', '_', '/'], "");
+        for p in Self::ALL {
+            let ident = format!("{:?}", p).to_ascii_lowercase();
+            let name_simplified = p.name().to_ascii_lowercase().replace([' ', '-', '_', '/'], "");
+            if ident.contains(&s) || name_simplified.contains(&s) || s.contains(&ident) {
+                return Some(p);
+            }
+        }
+        None
     }
 
     pub fn name(&self) -> &'static str {

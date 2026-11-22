@@ -126,7 +126,16 @@ impl AudioEngine {
     }
 
     pub fn set_playing(&self, playing: bool) {
+        if playing {
+            self.resume();
+        }
         self.is_playing.store(playing, Ordering::Relaxed);
+    }
+
+    pub fn resume(&self) {
+        if let Some(ref s) = self._stream {
+            let _ = s.play();
+        }
     }
 
     pub fn is_playing(&self) -> bool {
@@ -161,6 +170,7 @@ impl AudioEngine {
     }
 
     pub fn preview_chord(&self, chord: &crate::theory::Chord) {
+        self.resume();
         let notes = chord.voicing(60);
         if let Ok(mut lock) = self.shared_data.lock() {
             lock.preview_notes = notes;

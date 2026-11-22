@@ -1,5 +1,8 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use midly::{
     Format, Header, MetaMessage, MidiMessage, Smf, Timing, Track, TrackEvent,
@@ -8,6 +11,7 @@ use midly::{
 use crate::arranger::{ArrangerSettings, ScheduledNote, TICKS_PER_BAR, TICKS_PER_BEAT};
 use crate::theory::Progression;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn export_smf_file<P: AsRef<Path>>(
     path: P,
     prog: &Progression,
@@ -17,6 +21,42 @@ pub fn export_smf_file<P: AsRef<Path>>(
     let bytes = build_smf_bytes(prog, settings, chorus_count)?;
     let mut file = File::create(path).map_err(|e| format!("Failed to create file: {}", e))?;
     file.write_all(&bytes).map_err(|e| format!("Failed to write file: {}", e))?;
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn trigger_browser_midi_download(filename: &str, bytes: &[u8]) -> Result<(), String> {
+    use wasm_bindgen::JsCast;
+    use web_sys::{Blob, BlobPropertyBag, HtmlAnchorElement, Url};
+
+    let window = web_sys::window().ok_or("No global `window` exists")?;
+    let document = window.document().ok_or("No `document` on window")?;
+
+    let array = js_sys::Array::new();
+    let uint8_array = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+    uint8_array.copy_from(bytes);
+    array.push(&uint8_array);
+
+    let property_bag = BlobPropertyBag::new();
+    property_bag.set_type("audio/midi");
+
+    let blob = Blob::new_with_u8_array_sequence_and_options(&array, &property_bag)
+        .map_err(|e| format!("Failed to create Blob: {:?}", e))?;
+
+    let url = Url::create_object_url_with_blob(&blob)
+        .map_err(|e| format!("Failed to create object URL: {:?}", e))?;
+
+    let anchor = document
+        .create_element("a")
+        .map_err(|e| format!("Failed to create <a> element: {:?}", e))?
+        .dyn_into::<HtmlAnchorElement>()
+        .map_err(|_| "Failed to cast element to HtmlAnchorElement".to_string())?;
+
+    anchor.set_href(&url);
+    anchor.set_download(filename);
+    anchor.click();
+
+    let _ = Url::revoke_object_url(&url);
     Ok(())
 }
 
