@@ -1,5 +1,3 @@
-# Time Circle
-
 <div align="center">
 
 # ⏱️ Time Circle
